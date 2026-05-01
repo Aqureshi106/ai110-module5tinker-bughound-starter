@@ -172,29 +172,54 @@ class BugHoundAgent:
     # Parsing + utilities
     # ----------------------------
     def _parse_json_array_of_issues(self, text: str) -> Optional[List[Dict[str, str]]]:
-        text = text.strip()
+        text = self._strip_code_fences(text).strip()
         parsed = self._try_json_loads(text)
-        if isinstance(parsed, list):
-            return self._normalize_issues(parsed)
+        issues = self._coerce_issues_payload(parsed)
+        if issues is not None:
+            return issues
 
         array_str = self._extract_first_json_array(text)
         if array_str:
             parsed2 = self._try_json_loads(array_str)
-            if isinstance(parsed2, list):
-                return self._normalize_issues(parsed2)
+            issues = self._coerce_issues_payload(parsed2)
+            if issues is not None:
+                return issues
 
         return None
 
-    def _normalize_issues(self, arr: List[Any]) -> List[Dict[str, str]]:
+    def _coerce_issues_payload(self, parsed: Any) -> Optional[List[Dict[str, str]]]:
+        if isinstance(parsed, list):
+            return self._normalize_issues(parsed)
+
+        if isinstance(parsed, dict):
+            issues = parsed.get("issues")
+            if isinstance(issues, list):
+                return self._normalize_issues(issues)
+
+        return None
+
+    def _normalize_issues(self, arr: List[Any]) -> Optional[List[Dict[str, str]]]:
         issues: List[Dict[str, str]] = []
+
+        if not arr:
+            return []
+
         for item in arr:
             if not isinstance(item, dict):
-                continue
+                return None
+
+            issue_type = str(item.get("type", "")).strip()
+            severity = str(item.get("severity", "")).strip().title()
+            msg = str(item.get("msg", "")).strip()
+
+            if not issue_type or severity not in {"Low", "Medium", "High"} or not msg:
+                return None
+
             issues.append(
                 {
-                    "type": str(item.get("type", "Issue")),
-                    "severity": str(item.get("severity", "Unknown")),
-                    "msg": str(item.get("msg", "")).strip(),
+                    "type": issue_type,
+                    "severity": severity,
+                    "msg": msg,
                 }
             )
         return issues

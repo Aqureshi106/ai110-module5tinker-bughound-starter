@@ -1,3 +1,5 @@
+import ast
+
 from typing import Dict, List
 
 
@@ -26,6 +28,12 @@ def assess_risk(
             "reasons": ["No fix was produced."],
             "should_autofix": False,
         }
+
+    try:
+        ast.parse(fixed_code)
+    except SyntaxError as exc:
+        score -= 50
+        reasons.append(f"Fixed code has syntax errors: {exc.msg}.")
 
     original_lines = original_code.strip().splitlines()
     fixed_lines = fixed_code.strip().splitlines()
@@ -62,6 +70,13 @@ def assess_risk(
         score -= 5
         reasons.append("Bare except was modified, verify correctness.")
 
+    original_def = next((line.strip() for line in original_lines if line.strip().startswith("def ")), "")
+    fixed_def = next((line.strip() for line in fixed_lines if line.strip().startswith("def ")), "")
+
+    if original_def and fixed_def and original_def != fixed_def:
+        score -= 15
+        reasons.append("Function signature changed.")
+
     # ----------------------------
     # Clamp score
     # ----------------------------
@@ -80,7 +95,7 @@ def assess_risk(
     # ----------------------------
     # Auto-fix policy
     # ----------------------------
-    should_autofix = level == "low"
+    should_autofix = level == "low" and score >= 85
 
     if not reasons:
         reasons.append("No significant risks detected.")

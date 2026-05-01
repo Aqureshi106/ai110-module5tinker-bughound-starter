@@ -46,3 +46,51 @@ def test_missing_return_is_penalized():
     )
     assert risk["score"] < 100
     assert any("Return" in r or "return" in r for r in risk["reasons"])
+
+
+def test_borderline_low_risk_no_longer_autofixes():
+    original = "def f():\n    return True\n"
+    fixed = "def f():\n    return True\n"
+    issues = [
+        {"type": "Code Quality", "severity": "Low", "msg": "a"},
+        {"type": "Code Quality", "severity": "Low", "msg": "b"},
+        {"type": "Code Quality", "severity": "Low", "msg": "c"},
+        {"type": "Code Quality", "severity": "Low", "msg": "d"},
+    ]
+
+    risk = assess_risk(original_code=original, fixed_code=fixed, issues=issues)
+
+    assert risk["score"] == 80
+    assert risk["level"] == "low"
+    assert risk["should_autofix"] is False
+
+
+def test_function_signature_change_adds_caution():
+    original = "def greet(name):\n    print(name)\n"
+    fixed = "def greet(name, verbose=False):\n    if verbose:\n        print(name)\n    print(name)\n"
+
+    risk = assess_risk(
+        original_code=original,
+        fixed_code=fixed,
+        issues=[{"type": "Code Quality", "severity": "Low", "msg": "print"}],
+    )
+
+    assert any("signature" in reason.lower() for reason in risk["reasons"])
+    assert risk["score"] <= 80
+
+
+def test_syntax_error_in_fixed_code_blocks_autofix():
+    from bughound_agent import BugHoundAgent
+    from llm_client import MockClient
+
+    class MalformedFixClient(MockClient):
+        def complete(self, system_prompt: str, user_prompt: str) -> str:
+            if "Return ONLY valid JSON" in system_prompt:
+                return '[{"type":"Code Quality","severity":"Low","msg":"print statements"}]'
+            return "def f():\n    if True\n        return 1\n"
+
+    result = BugHoundAgent(client=MalformedFixClient()).run("def f():\n    print('hi')\n    return 1\n")
+
+    assert result["risk"]["level"] in ("medium", "high")
+    assert result["risk"]["should_autofix"] is False
+    assert any("syntax" in reason.lower() for reason in result["risk"]["reasons"])
